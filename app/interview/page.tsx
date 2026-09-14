@@ -1,6 +1,5 @@
 "use client";
 
-
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -11,14 +10,6 @@ interface Question {
   topic: string;
   difficulty: string;
 }
-
-const MOCK_QUESTIONS: Question[] = [
-  { id: 1, text: "Tell me about your experience with React. What projects have you built?", topic: "React Fundamentals", difficulty: "Medium" },
-  { id: 2, text: "How would you optimize a component that renders a list of 10,000 items?", topic: "Performance Optimization", difficulty: "Hard" },
-  { id: 3, text: "Explain the difference between useCallback and useMemo hooks.", topic: "React Hooks", difficulty: "Medium" },
-  { id: 4, text: "How do you handle state management in large applications?", topic: "State Management", difficulty: "Hard" },
-  { id: 5, text: "What is your approach to testing React components?", topic: "Testing", difficulty: "Medium" },
-];
 
 export default function InterviewPage() {
   const router = useRouter();
@@ -40,6 +31,9 @@ export default function InterviewPage() {
   const warningCountRef = useRef(0);
   const videoCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // ✅ State for dynamically generated questions
+  const [questions, setQuestions] = useState<Question[]>([]);
+
   const [cameraActive, setCameraActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -57,7 +51,7 @@ export default function InterviewPage() {
   const [warningMessage, setWarningMessage] = useState("");
   const [proctoringActive, setProctoringActive] = useState(false);
 
-  const currentQuestion = MOCK_QUESTIONS[currentQuestionIndex];
+  const currentQuestion = questions[currentQuestionIndex];
 
   // Sync refs with state
   useEffect(() => {
@@ -67,6 +61,24 @@ export default function InterviewPage() {
   useEffect(() => {
     warningCountRef.current = warningCount;
   }, [warningCount]);
+
+  // ==========================================
+  // 0. LOAD PERSONALIZED QUESTIONS
+  // ==========================================
+  useEffect(() => {
+    const stored = sessionStorage.getItem("interviewQuestions");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        setQuestions(parsed);
+        console.log("✅ Loaded personalized questions:", parsed.length);
+      } catch (e) {
+        console.error("Failed to parse questions:", e);
+      }
+    } else {
+      console.warn("⚠️ No personalized questions found in sessionStorage");
+    }
+  }, []);
 
   // ==========================================
   // 1. CAMERA INITIALIZATION
@@ -308,7 +320,7 @@ export default function InterviewPage() {
   const handleSubmitAnswer = async () => {
     await stopRecording();
 
-    if (currentQuestionIndex < MOCK_QUESTIONS.length - 1) {
+    if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex((prev) => prev + 1);
       setRecordingTime(0);
     } else {
@@ -330,7 +342,6 @@ export default function InterviewPage() {
       return;
     }
 
-    // ✅ Pull resume & job role from sessionStorage
     const resumeText = sessionStorage.getItem("resumeText") || "";
     const jobRole = sessionStorage.getItem("jobRole") || "Software Engineer";
     console.log(`🔴 Resume length: ${resumeText.length} chars`);
@@ -344,7 +355,9 @@ export default function InterviewPage() {
 
       for (let i = 0; i < recordedBlobs.length; i++) {
         const blob = recordedBlobs[i];
-        const question = MOCK_QUESTIONS[i];
+        const question = questions[i];
+
+        if (!question) continue; // Safety check
 
         setAnalysisProgress(`Analyzing answer ${i + 1} of ${recordedBlobs.length}...`);
 
@@ -352,7 +365,6 @@ export default function InterviewPage() {
         formData.append("audio", blob, `answer-${i}.webm`);
         formData.append("question", question.text);
         formData.append("topic", question.topic);
-        // ✅ Send resume and job role to the API
         formData.append("resume", resumeText);
         formData.append("jobRole", jobRole);
 
@@ -411,7 +423,28 @@ export default function InterviewPage() {
   };
 
   // ==========================================
-  // 8. RENDER: ANALYZING SCREEN
+  // 8. RENDER: LOADING QUESTIONS
+  // ==========================================
+  if (questions.length === 0) {
+    return (
+      <main className="min-h-screen bg-slate-950 flex items-center justify-center text-white">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-400 mx-auto mb-4"></div>
+          <p className="text-slate-400">Loading your personalized interview...</p>
+          <p className="text-slate-500 text-xs mt-2">If this takes more than 10 seconds, please go back to setup.</p>
+          <Link
+            href="/setup"
+            className="inline-block mt-6 text-cyan-400 hover:underline text-sm"
+          >
+            ← Back to Setup
+          </Link>
+        </div>
+      </main>
+    );
+  }
+
+  // ==========================================
+  // 9. RENDER: ANALYZING SCREEN
   // ==========================================
   if (isAnalyzing) {
     return (
@@ -435,7 +468,7 @@ export default function InterviewPage() {
   }
 
   // ==========================================
-  // 9. RENDER: COMPLETE SCREEN
+  // 10. RENDER: COMPLETE SCREEN
   // ==========================================
   if (isInterviewComplete) {
     return (
@@ -451,7 +484,7 @@ export default function InterviewPage() {
             </p>
           ) : (
             <p className="text-slate-300 mb-2">
-              You answered <span className="text-cyan-400 font-semibold">{recordedBlobs.length}</span> out of {MOCK_QUESTIONS.length} questions.
+              You answered <span className="text-cyan-400 font-semibold">{recordedBlobs.length}</span> out of {questions.length} questions.
             </p>
           )}
           {warningCount > 0 && warningCount < 3 && (
@@ -477,7 +510,7 @@ export default function InterviewPage() {
   }
 
   // ==========================================
-  // 10. RENDER: INTERVIEW SCREEN
+  // 11. RENDER: INTERVIEW SCREEN
   // ==========================================
   return (
     <main className="min-h-screen bg-slate-950 px-4 py-8 text-white">
@@ -486,7 +519,7 @@ export default function InterviewPage() {
           <div>
             <h1 className="text-3xl font-bold">Live Interview</h1>
             <p className="text-sm text-slate-400 mt-1">
-              Question {currentQuestionIndex + 1} of {MOCK_QUESTIONS.length}
+              Question {currentQuestionIndex + 1} of {questions.length}
             </p>
           </div>
           <div className="text-right">
@@ -583,7 +616,7 @@ export default function InterviewPage() {
                 <div className="flex items-center justify-between">
                   <span className="text-slate-300">Answers</span>
                   <span className="text-cyan-400 font-semibold">
-                    {recordedBlobs.length} / {MOCK_QUESTIONS.length}
+                    {recordedBlobs.length} / {questions.length}
                   </span>
                 </div>
                 <div className="flex items-center justify-between">
@@ -598,7 +631,7 @@ export default function InterviewPage() {
             <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
               <h2 className="font-semibold mb-3 text-sm">Progress</h2>
               <div className="space-y-2">
-                {MOCK_QUESTIONS.map((_, idx) => (
+                {questions.map((_, idx) => (
                   <div
                     key={idx}
                     className={`h-2 rounded-full transition-all ${
