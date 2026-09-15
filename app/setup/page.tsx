@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { validateResumeText } from "../utils/validateResume";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function SetupPage() {
   const [parseError, setParseError] = useState<string | null>(null);
   const [showManualPaste, setShowManualPaste] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+  const [validationWarning, setValidationWarning] = useState<string | null>(null);
 
   useEffect(() => {
     const saved = sessionStorage.getItem("resumeText");
@@ -27,11 +29,12 @@ export default function SetupPage() {
   }, []);
 
   // ==========================================
-  // PDF PARSING
+  // PDF PARSING WITH VALIDATION
   // ==========================================
   const handleFileUpload = async (file: File) => {
     setIsParsing(true);
     setParseError(null);
+    setValidationWarning(null);
 
     try {
       if (!file.name.toLowerCase().endsWith(".pdf") && !file.name.toLowerCase().endsWith(".txt")) {
@@ -55,6 +58,25 @@ export default function SetupPage() {
       if (extractedText.length < 50) {
         throw new Error(
           "Could not extract enough text from the file. Is it an image-based PDF? Try pasting the text manually."
+        );
+      }
+
+      // ✅ Validate that this is actually a resume
+      const validation = validateResumeText(extractedText);
+      console.log("Resume validation:", validation);
+
+      if (!validation.isValid) {
+        throw new Error(
+          `This doesn't look like a resume. ${validation.reason}. Detected: ${
+            validation.detectedSignals.join(", ") || "nothing"
+          }`
+        );
+      }
+
+      // If validation is borderline (50-65%), show a warning but allow it
+      if (validation.confidence < 65) {
+        setValidationWarning(
+          `Low confidence this is a resume (${validation.confidence}%). We'll proceed anyway.`
         );
       }
 
@@ -103,13 +125,14 @@ export default function SetupPage() {
     setResumeText("");
     setFileName("");
     setParseError(null);
+    setValidationWarning(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
     sessionStorage.removeItem("resumeText");
     sessionStorage.removeItem("resumeFileName");
   };
 
   // ==========================================
-  // START INTERVIEW — GENERATE QUESTIONS FIRST
+  // START INTERVIEW
   // ==========================================
   const handleStartInterview = async () => {
     if (!resumeText.trim()) {
@@ -121,13 +144,11 @@ export default function SetupPage() {
     setIsGenerating(true);
     setStatusMessage("Analyzing your resume...");
 
-    // Save to sessionStorage immediately
     sessionStorage.setItem("resumeText", resumeText.trim());
     sessionStorage.setItem("resumeFileName", fileName);
     sessionStorage.setItem("jobRole", jobRole);
 
     try {
-      // Give the user a moment to see the message
       await new Promise((r) => setTimeout(r, 400));
       setStatusMessage("Generating personalized questions...");
 
@@ -150,7 +171,6 @@ export default function SetupPage() {
         throw new Error("No questions generated");
       }
 
-      // Save questions to sessionStorage for the interview page
       sessionStorage.setItem("interviewQuestions", JSON.stringify(data.questions));
       console.log("✅ Generated questions:", data.questions);
 
@@ -161,9 +181,7 @@ export default function SetupPage() {
       router.push(`/interview?sessionId=${sessionId}`);
     } catch (error) {
       console.error("Setup error:", error);
-      alert(
-        "Failed to generate personalized questions. Please try again, or refresh the page."
-      );
+      alert("Failed to generate personalized questions. Please try again, or refresh the page.");
       setIsStarting(false);
       setIsGenerating(false);
       setStatusMessage("");
@@ -232,6 +250,13 @@ export default function SetupPage() {
                   Replace
                 </button>
               </div>
+
+              {/* Validation warning */}
+              {validationWarning && (
+                <div className="mt-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                  <p className="text-xs text-yellow-400">⚠️ {validationWarning}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -253,14 +278,17 @@ export default function SetupPage() {
           {isParsing && (
             <div className="border-2 border-cyan-400/50 rounded-xl p-10 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-4 border-cyan-400 mx-auto mb-4"></div>
-              <p className="text-cyan-400 font-semibold">Extracting text from your resume...</p>
+              <p className="text-cyan-400 font-semibold">Extracting and validating your resume...</p>
             </div>
           )}
 
           {parseError && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4">
-              <p className="text-red-400 font-semibold text-sm mb-1">⚠️ Could not parse file</p>
+              <p className="text-red-400 font-semibold text-sm mb-1">⚠️ Resume rejected</p>
               <p className="text-xs text-slate-400">{parseError}</p>
+              <p className="text-xs text-slate-500 mt-2">
+                Please upload a valid resume PDF or paste the text manually below.
+              </p>
             </div>
           )}
 
@@ -277,6 +305,8 @@ export default function SetupPage() {
                 onChange={(e) => {
                   setResumeText(e.target.value);
                   setFileName("pasted-resume.txt");
+                  setParseError(null);
+                  setValidationWarning(null);
                 }}
                 placeholder="Paste your resume text here..."
                 className="w-full h-48 bg-slate-950 text-slate-200 border border-slate-700 rounded-lg p-4 font-mono text-sm leading-relaxed focus:outline-none focus:border-cyan-400 resize-none mt-3"
@@ -290,6 +320,7 @@ export default function SetupPage() {
           <p className="text-sm text-cyan-300 font-semibold mb-2">✨ How this works</p>
           <ul className="text-xs text-slate-300 space-y-1.5 leading-relaxed">
             <li>• Your resume is parsed <strong>in your browser</strong> — nothing uploaded to a server</li>
+            <li>• We <strong>validate</strong> that the file is actually a resume before processing</li>
             <li>• Our AI <strong>generates 5 custom interview questions</strong> based on your specific background</li>
             <li>• The questions adapt to your experience level — junior, mid, or senior</li>
             <li>• Feedback references your actual projects and skills</li>
